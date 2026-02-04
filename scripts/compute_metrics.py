@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import sys
+import warnings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +28,16 @@ from app.metrics import (
 
 
 def main() -> None:
+    warnings.filterwarnings(
+        "ignore",
+        message="pkg_resources is deprecated as an API.*",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="torch.meshgrid: in an upcoming release.*",
+    )
+    logging.getLogger("torch.fx").setLevel(logging.ERROR)
+
     lock_path = Path(METRICS_LOCK)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("running")
