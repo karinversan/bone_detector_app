@@ -14,6 +14,9 @@ FRCNN_VAL_JSON = "data/BoneFractureYolo8/val_merged.json"
 FRCNN_VAL_IMAGES = "data/BoneFractureYolo8/valid/images"
 FRCNN_VAL_LABELS = "data/BoneFractureYolo8/valid/labels"
 YOLO_DATA_YAML = "data/BoneFractureYolo8/data.yaml"
+METRICS_CACHE_DIR = "cache"
+FRCNN_METRICS_CACHE = f"{METRICS_CACHE_DIR}/metrics_frcnn.json"
+YOLO_METRICS_CACHE = f"{METRICS_CACHE_DIR}/metrics_yolo.json"
 
 NEW_NAMES = [
     "elbow positive",
@@ -40,11 +43,8 @@ KEPT_OLD_IDS = [0, 1, 2, 4, 5, 6]
 OLD_TO_NEW = {old_id: new_id for new_id, old_id in enumerate(KEPT_OLD_IDS)}
 
 FRCNN_TRAINING_ATTRS = {
-    "config": "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml",
-    "datasets": "fracture_train_merged / fracture_val_merged",
-    "labels_source": "YOLO seg -> COCO (merged classes)",
-    "num_classes": 6,
-    "input_size": "1024 (min/max)",
+    "model": "Faster R-CNN ResNet-50-FPN",
+    "image_size": 1024,
     "anchor_ratios": "[0.33, 0.5, 1.0, 2.0, 3.0] * 5",
     "ims_per_batch": 2,
     "base_lr": 0.0025,
@@ -56,8 +56,7 @@ FRCNN_TRAINING_ATTRS = {
 }
 
 YOLO_TRAINING_ATTRS = {
-    "config": "Ultralytics YOLO (from checkpoint)",
-    "datasets": "not provided",
-    "input_size": "not provided",
-    "num_classes": "from checkpoint",
+    "model": "YOLO26m",
+    "image_size": 640,
+    "epochs": 50,
 }

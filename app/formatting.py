@@ -43,3 +43,10 @@ def dict_to_rows_str(data: dict, key_name: str, value_name: str) -> list[dict]:
 
 def metrics_to_display(metrics: dict) -> dict:
     return {key: format_metric(value) for key, value in metrics.items()}
+
+
+def dict_to_markdown_list(data: dict) -> str:
+    lines = []
+    for key, value in data.items():
+        lines.append(f"- **{key}**: {value}")
+    return "\n".join(lines)
