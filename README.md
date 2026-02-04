@@ -35,41 +35,9 @@ An application for fracture detection on X‑ray images: Streamlit UI + two dete
 
 ---
 
-## Architecture (in words)
+## Architecture
 
 Flow: Streamlit UI accepts an image → basic preprocessing (PIL‑RGB, BGR for Detectron2) → model inference → post‑processing/box visualization → metrics are computed in the background via Celery and cached in `cache/`.
-
----
-
-## Data and download
-
-**Source:** Kaggle dataset `pkdarabi/bone-fracture-detection-computer-vision-project`  
-**Author:** pkdarabi (Kaggle)  
-**License:** CC BY 4.0 (listed in `data/BoneFractureYolo8/data.yaml`)  
-**Description:** a set of upper‑extremity X‑ray images with fracture annotations by class; annotations are provided as bounding boxes or pixel‑level segmentation masks.  
-**Classes (7):** Elbow Positive, Fingers Positive, Forearm Fracture, Humerus Fracture, Humerus, Shoulder Fracture, Wrist Positive.  
-**Notes:** the dataset already includes augmentations (rotations, brightness/contrast changes). The split contains images without fractures (empty label files).
-
-**Download and place in the expected folder** (required for conversion and metric computation):
-
-```bash
-pip install kaggle
-
-# place kaggle.json into ~/.kaggle/ (Kaggle API access)
-kaggle datasets download -d pkdarabi/bone-fracture-detection-computer-vision-project -p data --unzip
-```
-
-Expected structure (used in `app/config.py` and for metrics):
-```
-data/BoneFractureYolo8/
-  train/images, train/labels
-  valid/images, valid/labels
-  test/images,  test/labels
-```
-If the extracted folder has a different name, rename it to `BoneFractureYolo8`.
-
-Dataset citation DOI: `10.13140/RG.2.2.14400.34569`  
-ResearchGate: `https://www.researchgate.net/publication/382268240_Bone_Fracture_Detection_Computer_Vision_Project`
 
 ---
 
@@ -145,6 +113,39 @@ redis-server
 .venv/bin/celery -A app.celery_app worker --loglevel=info
 .venv/bin/streamlit run main.py
 ```
+
+---
+
+
+## Data and download
+
+**Source:** Kaggle dataset `pkdarabi/bone-fracture-detection-computer-vision-project`  
+**Author:** pkdarabi (Kaggle)  
+**License:** CC BY 4.0 (listed in `data/BoneFractureYolo8/data.yaml`)  
+**Description:** a set of upper‑extremity X‑ray images with fracture annotations by class; annotations are provided as bounding boxes or pixel‑level segmentation masks.  
+**Classes (7):** Elbow Positive, Fingers Positive, Forearm Fracture, Humerus Fracture, Humerus, Shoulder Fracture, Wrist Positive.  
+**Notes:** the dataset already includes augmentations (rotations, brightness/contrast changes). The split contains images without fractures (empty label files).
+
+**Download and place in the expected folder** (required for conversion and metric computation):
+
+```bash
+pip install kaggle
+
+# place kaggle.json into ~/.kaggle/ (Kaggle API access)
+kaggle datasets download -d pkdarabi/bone-fracture-detection-computer-vision-project -p data --unzip
+```
+
+Expected structure (used in `app/config.py` and for metrics):
+```
+data/BoneFractureYolo8/
+  train/images, train/labels
+  valid/images, valid/labels
+  test/images,  test/labels
+```
+If the extracted folder has a different name, rename it to `BoneFractureYolo8`.
+
+Dataset citation DOI: `10.13140/RG.2.2.14400.34569`  
+ResearchGate: `https://www.researchgate.net/publication/382268240_Bone_Fracture_Detection_Computer_Vision_Project`
 
 ---
 
