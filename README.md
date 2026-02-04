@@ -28,10 +28,10 @@ An application for fracture detection on X‑ray images: Streamlit UI + two dete
 
 ## Demo
 
-<details>
-  <summary><b>Demo (gif/video)</b></summary>
-  <p><img src="media/demo.gif" alt="Demo" /></p>
-</details>
+
+<summary><b>Demo (gif/video)</b></summary>
+<p><img src="media/demo.gif" alt="Demo" /></p>
+
 
 ---
 
