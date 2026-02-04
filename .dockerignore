@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.cache
+cache
+output_eval_frcnn
+runs
+*.log

@@ -15,8 +15,6 @@ logging.getLogger("torch.fx").setLevel(logging.ERROR)
 logging.getLogger("torch.fx._symbolic_trace").setLevel(logging.ERROR)
 
 from pathlib import Path
-import subprocess
-import sys
 import time
 
 from PIL import Image
@@ -106,17 +104,21 @@ def _ensure_metrics_job() -> None:
             return
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(str(time.time()))
-    log_path = lock_path.with_suffix(".log")
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_file = open(log_path, "a")
-    subprocess.Popen(
-        [sys.executable, "scripts/compute_metrics.py"],
-        cwd=Path(__file__).resolve().parent,
-        stdout=log_file,
-        stderr=log_file,
-        start_new_session=True,
-    )
-    log_file.close()
+    try:
+        from app.tasks import compute_metrics
+    except Exception:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+        return
+    try:
+        compute_metrics.delay()
+    except Exception:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
 
 
 def main() -> None:

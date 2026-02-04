@@ -1,0 +1,42 @@
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+    platform: linux/amd64
+    command: celery -A app.celery_app worker --loglevel=info
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./:/app
+      - ./cache:/app/cache
+      - ./data:/app/data
+      - ./weights:/app/weights
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+    platform: linux/amd64
+    ports:
+      - "8501:8501"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./:/app
+      - ./cache:/app/cache
+      - ./data:/app/data
+      - ./weights:/app/weights
+    depends_on:
+      - redis
+      - worker
+    restart: unless-stopped
