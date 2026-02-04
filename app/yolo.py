@@ -14,7 +14,7 @@ def load_yolo_model(weights_path: str):
             safe_globals = None
     except ImportError as exc:
         raise RuntimeError(
-            "Ultralytics is not installed. Install ultralytics to use the YOLO model."
+            f"Ultralytics import failed: {exc}"
         ) from exc
     if safe_globals is not None:
         with safe_globals([DetectionModel]):

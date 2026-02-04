@@ -10,6 +10,8 @@ RUN apt-get update \
         build-essential \
         git \
         curl \
+        libgl1 \
+        libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
