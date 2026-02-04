@@ -1,6 +1,6 @@
 # Bone X‑Ray Fracture Detector
 
-Приложение для детекции переломов на рентген‑снимках: Streamlit UI + два детектора (Detectron2 Faster R‑CNN и Ultralytics YOLO) с фоновой оценкой метрик через Celery/Redis.
+An application for fracture detection on X‑ray images: Streamlit UI + two detectors (Detectron2 Faster R‑CNN and Ultralytics YOLO) with background metric computation via Celery/Redis.
 
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11-blue" />
@@ -18,12 +18,12 @@
 
 ## Highlights
 
-- Один UI для двух моделей: Faster R‑CNN (Detectron2) и YOLO (Ultralytics).
-- Асинхронный расчёт метрик через Celery + Redis без блокировки UI.
-- Кеш метрик в `cache/` и повторное отображение без пересчёта.
-- Единый 6‑классовый протокол оценки (merge `humerus fracture → humerus`) для сравнения моделей.
-- Метрики: COCO AP + FROC/Sensitivity@FP‑per‑image.
-- Запуск всего стека через Docker Compose.
+- One UI for two models: Faster R‑CNN (Detectron2) and YOLO (Ultralytics).
+- Asynchronous metric computation via Celery + Redis without blocking the UI.
+- Metrics cache in `cache/` with instant reuse.
+- Unified 6‑class evaluation protocol (merge `humerus fracture → humerus`) for model comparison.
+- Metrics: COCO AP + FROC/Sensitivity@FP‑per‑image.
+- Full stack runs via Docker Compose.
 
 ---
 
@@ -31,75 +31,75 @@
 
 <details>
   <summary><b>Demo (gif/video)</b></summary>
-  <p>Файл добавлю позже</p>
+  <p>Add a demo file (gif/mp4) to the repository and place its link inside this block.</p>
 </details>
 
 ---
 
-## Architecture (словами)
+## Architecture (in words)
 
-Поток приложения: Streamlit UI принимает изображение → базовый preprocessing (PIL‑RGB, BGR для Detectron2) → модель делает предсказания → постобработка/визуализация боксов → метрики считаются в фоне через Celery и кешируются в `cache/`.
+Flow: Streamlit UI accepts an image → basic preprocessing (PIL‑RGB, BGR for Detectron2) → model inference → post‑processing/box visualization → metrics are computed in the background via Celery and cached in `cache/`.
 
 ---
 
-## Данные и загрузка
+## Data and download
 
-**Источник:** Kaggle dataset `pkdarabi/bone-fracture-detection-computer-vision-project`  
-**Автор:** pkdarabi (Kaggle)  
-**Лицензия:** CC BY 4.0 (указана в `data/BoneFractureYolo8/data.yaml`)  
-**Описание:** набор рентген‑снимков верхней конечности с разметкой переломов по классам; аннотации представлены как bounding boxes или сегментационные маски.  
-**Классы (7):** Elbow Positive, Fingers Positive, Forearm Fracture, Humerus Fracture, Humerus, Shoulder Fracture, Wrist Positive.  
-**Особенности:** датасет уже содержит аугментации (повороты, изменения яркости/контраста). В выборке есть снимки без переломов (пустые label‑файлы).
+**Source:** Kaggle dataset `pkdarabi/bone-fracture-detection-computer-vision-project`  
+**Author:** pkdarabi (Kaggle)  
+**License:** CC BY 4.0 (listed in `data/BoneFractureYolo8/data.yaml`)  
+**Description:** a set of upper‑extremity X‑ray images with fracture annotations by class; annotations are provided as bounding boxes or pixel‑level segmentation masks.  
+**Classes (7):** Elbow Positive, Fingers Positive, Forearm Fracture, Humerus Fracture, Humerus, Shoulder Fracture, Wrist Positive.  
+**Notes:** the dataset already includes augmentations (rotations, brightness/contrast changes). The split contains images without fractures (empty label files).
 
-**Как скачать и положить в нужную папку** (нужно для конвертации и подсчёта метрик):
+**Download and place in the expected folder** (required for conversion and metric computation):
 
 ```bash
 pip install kaggle
 
-# положите kaggle.json в ~/.kaggle/ (доступ к Kaggle API)
+# place kaggle.json into ~/.kaggle/ (Kaggle API access)
 kaggle datasets download -d pkdarabi/bone-fracture-detection-computer-vision-project -p data --unzip
 ```
 
-Ожидаемая структура (используется в `app/config.py` и для метрик):
+Expected structure (used in `app/config.py` and for metrics):
 ```
 data/BoneFractureYolo8/
   train/images, train/labels
   valid/images, valid/labels
   test/images,  test/labels
 ```
-Если папка после скачивания называется иначе — переименуйте в `BoneFractureYolo8`.
+If the extracted folder has a different name, rename it to `BoneFractureYolo8`.
 
-Для цитирования датасета указана DOI: `10.13140/RG.2.2.14400.34569`  
+Dataset citation DOI: `10.13140/RG.2.2.14400.34569`  
 ResearchGate: `https://www.researchgate.net/publication/382268240_Bone_Fracture_Detection_Computer_Vision_Project`
 
 ---
 
-## Как я решал задачу
+## How I approached the task
 
-- Проанализировала разметку YOLO‑seg и распределение классов.
-- Объединила `humerus fracture` с `humerus`, т.к. в исходных label‑файлах всего 3 объекта этого класса.
-- Сделала единый протокол сравнения моделей через COCO‑JSON и маппинг классов.
-- Сконструировала общий инференс‑поток и унифицированный формат детекций для отрисовки.
-- Вынесла расчёт метрик в Celery‑очередь и добавила кеш + lock‑механику.
-- Упаковала приложение, воркер и Redis в Docker Compose.
-- Обучение зафиксировано в исследовательском ноутбуке:
-  - YOLO: 50 эпох, `imgsz=640`.
-  - Faster R‑CNN: `NUM_CLASSES=6`, `imgsz=1024`, `FILTER_EMPTY_ANNOTATIONS=False` (включая снимки без переломов).
-- В обучение включены все данные, включая изображения без переломов.
-- Датасет уже содержит аугментации; дополнительная аугментация улучшений не дала.
-
----
-
-## Проблемы и решения
-
-- Разная схема классов (7 vs 6) → мёрж и маппинг классов → сопоставимые метрики.
-- Формат YOLO‑seg разметки → конвертация в COCO → корректный COCOeval.
-- Detectron2 ожидает BGR → явная конвертация RGB→BGR → корректный инференс.
-- Долгий пересчёт метрик → Celery + Redis + кеш → UI остаётся отзывчивым.
+- Analyzed YOLO‑seg labels and class distribution.
+- Merged `humerus fracture` into `humerus` because that class has only 3 objects in the original labels.
+- Built a unified evaluation protocol via COCO‑JSON and class mapping.
+- Implemented a shared inference flow and a unified detection format for visualization.
+- Moved metric computation to a Celery queue and added cache + lock mechanism.
+- Packaged the app, worker, and Redis in Docker Compose.
+- Training was tracked in a research notebook:
+  - YOLO: 50 epochs, `imgsz=640`.
+  - Faster R‑CNN: `NUM_CLASSES=6`, `imgsz=1024`, `FILTER_EMPTY_ANNOTATIONS=False` (includes images without fractures).
+- All data, including images without fractures, were used for training.
+- The dataset already contains augmentations; additional augmentation did not improve results.
 
 ---
 
-## Результаты
+## Problems and solutions
+
+- Different class schemes (7 vs 6) → class merge + mapping → comparable metrics.
+- YOLO‑seg labels → COCO conversion → correct COCOeval.
+- Detectron2 expects BGR → explicit RGB→BGR conversion → correct inference.
+- Long metric computation → Celery + Redis + cache → responsive UI.
+
+---
+
+## Results (current split in this repo, protocol: 6‑class merged)
 
 <table>
   <thead>
@@ -126,19 +126,19 @@ ResearchGate: `https://www.researchgate.net/publication/382268240_Bone_Fracture_
   </tbody>
 </table>
 
-Интерпретация: на этом протоколе Faster R‑CNN показывает более высокую Sens@1 FP/image при одинаковых условиях оценки.
+Interpretation: under this protocol, Faster R‑CNN shows higher Sens@1 FP/image at the same evaluation settings.
 
 ---
 
-## Запуск
+## Run
 
 ### Docker Compose
 ```bash
 docker compose up --build
 ```
-Открыть: `http://localhost:8501`
+Open: `http://localhost:8501`
 
-### Локально
+### Local
 ```bash
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
@@ -149,8 +149,11 @@ redis-server
 
 ---
 
-## Ограничения и что дальше
-- Метрики валидны для текущего сплита; внешней валидации нет.
-- Результаты зависят от качества разметки и источника снимков.
-- Данные не хранятся в репозитории и должны быть скачаны отдельно (см. раздел «Данные и загрузка»).
-- В репозитории нет клинической или регуляторной валидации; проект не является медицинским устройством и предназначен для research/education.
+## Limitations and next steps
+
+- Metrics are valid only for the current split; no external validation.
+- Training is documented in a notebook, not a fully reproducible pipeline/script.
+- Results depend on label quality and imaging source.
+- Data are not stored in the repo and must be downloaded separately (see “Data and download”).
+- No clinical/regulatory validation; this is not a medical device and is intended for research/education.
+
