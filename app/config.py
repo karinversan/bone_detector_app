@@ -17,6 +17,9 @@ YOLO_DATA_YAML = "data/BoneFractureYolo8/data.yaml"
 METRICS_CACHE_DIR = "cache"
 FRCNN_METRICS_CACHE = f"{METRICS_CACHE_DIR}/metrics_frcnn.json"
 YOLO_METRICS_CACHE = f"{METRICS_CACHE_DIR}/metrics_yolo.json"
+METRICS_LOCK = f"{METRICS_CACHE_DIR}/metrics.lock"
+FROC_IOU = 0.5
+FROC_FP_PER_IMAGE = [0.5, 1.0, 2.0, 4.0]
 
 NEW_NAMES = [
     "elbow positive",

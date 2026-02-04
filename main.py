@@ -1,80 +1,109 @@
-"""Streamlit entrypoint.
-
-Modules:
-- app.config: paths, labels, training attrs
-- app.detectron: Detectron2 cfg and inference
-- app.yolo: Ultralytics inference
-- app.metrics: metrics computation
-- app.hf: optional HF download
-- app.ui: rendering helpers
-- app.formatting: table/metric formatting
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
+
+import logging
+import warnings
 
 from PIL import Image
 import streamlit as st
 
 from app.config import (
     DETECTRON_DEFAULT_WEIGHTS,
-    FRCNN_FILENAME,
     FRCNN_TRAINING_ATTRS,
-    FRCNN_VAL_IMAGES,
-    FRCNN_VAL_JSON,
-    FRCNN_VAL_LABELS,
     FRCNN_METRICS_CACHE,
-    HF_REPO_ID,
+    METRICS_LOCK,
     NEW_NAMES,
-    YOLO_DATA_YAML,
     YOLO_DEFAULT_WEIGHTS,
-    YOLO_FILENAME,
     YOLO_METRICS_CACHE,
     YOLO_TRAINING_ATTRS,
 )
 from app.detectron import load_detectron_model, predict_detectron
-from app.formatting import (
-    dict_to_rows,
-    dict_to_rows_str,
-    metrics_to_display,
-    metrics_with_f1,
-)
-from app.metrics import (
-    get_or_compute_frcnn_metrics_with_download,
-    get_or_compute_yolo_metrics_with_download,
-)
+from app.formatting import dict_to_rows_str
+from app.metrics import load_metrics_cache
 from app.ui import draw_detections, top_detection_summary
 from app.yolo import load_yolo_model, predict_yolo
 
 
-def _get_frcnn_metrics() -> tuple[dict, dict, int, bool]:
-    return get_or_compute_frcnn_metrics_with_download(
-        HF_REPO_ID,
-        Path(DETECTRON_DEFAULT_WEIGHTS),
-        FRCNN_FILENAME,
-        Path(FRCNN_VAL_JSON),
-        Path(FRCNN_VAL_IMAGES),
-        Path(FRCNN_VAL_LABELS),
-        Path(FRCNN_METRICS_CACHE),
+def _render_key_metrics(metrics: dict, froc_curve: list[dict]) -> None:
+    def fmt(value: float | None) -> str:
+        return f"{value:.3f}" if isinstance(value, (int, float)) else "—"
+
+    ap50_95 = metrics.get("AP50-95")
+    ap50 = metrics.get("AP50")
+
+    sens_items: list[tuple[float, float]] = []
+    for key, value in metrics.items():
+        if key.startswith("Sensitivity@"):
+            try:
+                fp = float(key.split("@", 1)[1].split()[0])
+            except Exception:
+                continue
+            if isinstance(value, (int, float)):
+                sens_items.append((fp, float(value)))
+    sens_items.sort(key=lambda x: x[0])
+
+    st.markdown("**Clinical focus: sensitivity (do not miss fractures)**")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("AP50-95", fmt(ap50_95))
+    with col2:
+        st.metric("AP50", fmt(ap50))
+    with col3:
+        headline = sens_items[1] if len(sens_items) > 1 else (sens_items[0] if sens_items else None)
+        if headline:
+            st.metric(f"Sens@{headline[0]} FP/img", fmt(headline[1]))
+        else:
+            st.metric("Sensitivity", "—")
+
+    if sens_items:
+        rows = [{"FP/image": fp, "Sensitivity": sens} for fp, sens in sens_items]
+        st.table(rows)
+
+    if froc_curve:
+        st.markdown("FROC curve (sensitivity vs FP/image)")
+        try:
+            import pandas as pd
+
+            df = pd.DataFrame(froc_curve)
+            st.line_chart(df.set_index("fp_per_image")["sensitivity"])
+        except Exception:
+            st.table(froc_curve[:50])
+
+
+def _ensure_metrics_job() -> None:
+    cache_ready = (
+        Path(FRCNN_METRICS_CACHE).exists() and Path(YOLO_METRICS_CACHE).exists()
     )
-
-
-def _get_yolo_metrics() -> tuple[dict, dict, bool]:
-    return get_or_compute_yolo_metrics_with_download(
-        HF_REPO_ID,
-        Path(YOLO_DEFAULT_WEIGHTS),
-        YOLO_FILENAME,
-        Path(FRCNN_VAL_JSON),
-        Path(FRCNN_VAL_IMAGES),
-        Path(YOLO_METRICS_CACHE),
+    lock_path = Path(METRICS_LOCK)
+    if cache_ready or lock_path.exists():
+        return
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("running")
+    subprocess.Popen(
+        [sys.executable, "scripts/compute_metrics.py"],
+        cwd=Path(__file__).resolve().parent,
     )
 
 
 def main() -> None:
+    warnings.filterwarnings(
+        "ignore",
+        message="pkg_resources is deprecated as an API.*",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message="torch.meshgrid: in an upcoming release.*",
+    )
+    logging.getLogger("torch.fx").setLevel(logging.ERROR)
+
     st.set_page_config(page_title="Bone X-Ray Detector")
     st.title("Bone X-Ray Detector")
     st.caption("Upload an X-ray image, choose a model, and run predictions.")
+
+    _ensure_metrics_job()
 
     tab_predict, tab_models = st.tabs(["Predict", "Models"])
 
@@ -125,38 +154,27 @@ def main() -> None:
             st.table(dict_to_rows_str(FRCNN_TRAINING_ATTRS, "Attribute", "Value"))
 
             st.markdown("Metrics")
-            try:
-                with st.spinner("Computing metrics..."):
-                    metrics, per_class, bad_class_lines, from_cache = _get_frcnn_metrics()
+            cache = load_metrics_cache(Path(FRCNN_METRICS_CACHE))
+            if cache and "metrics" in cache:
+                metrics = cache["metrics"]
+                froc_curve = cache.get("froc_curve", [])
+                bad_class_lines = int(cache.get("bad_class_lines", 0))
                 if bad_class_lines:
                     st.warning(
                         f"Skipped {bad_class_lines} label lines with invalid class_id."
                     )
-                metrics = metrics_with_f1(metrics)
-                metrics_display = metrics_to_display(metrics)
-                st.table(dict_to_rows_str(metrics_display, "Metric", "Value"))
-                if per_class:
-                    st.markdown("Per-class AP (IoU=0.50:0.95)")
-                    st.table(dict_to_rows_str(per_class, "Class", "AP"))
-            except Exception as exc:
-                st.error(f"Metrics failed: {exc}")
+                _render_key_metrics(metrics, froc_curve)
         else:
             st.subheader("YOLO (Ultralytics)")
             st.markdown("Training attributes")
             st.table(dict_to_rows_str(YOLO_TRAINING_ATTRS, "Attribute", "Value"))
 
             st.markdown("Metrics")
-            try:
-                with st.spinner("Computing metrics..."):
-                    metrics, per_class, from_cache = _get_yolo_metrics()
-                metrics = metrics_with_f1(metrics)
-                metrics_display = metrics_to_display(metrics)
-                st.table(dict_to_rows_str(metrics_display, "Metric", "Value"))
-                if per_class:
-                    st.markdown("Per-class AP (IoU=0.50:0.95)")
-                    st.table(dict_to_rows_str(per_class, "Class", "AP"))
-            except Exception as exc:
-                st.error(f"Metrics failed: {exc}")
+            cache = load_metrics_cache(Path(YOLO_METRICS_CACHE))
+            if cache and "metrics" in cache:
+                metrics = cache["metrics"]
+                froc_curve = cache.get("froc_curve", [])
+                _render_key_metrics(metrics, froc_curve)
 
 
 if __name__ == "__main__":
