@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 from typing import Iterable
 
 import numpy as np
@@ -9,8 +10,13 @@ import streamlit as st
 import torch
 
 
-DETECTRON_DEFAULT_WEIGHTS = "weights/model_final_frcnn.pth"
-YOLO_DEFAULT_WEIGHTS = "weights/best_yolo26m_640.pt"
+WEIGHTS_DIR = "weights"
+FRCNN_FILENAME = os.getenv("HF_FILENAME_FRCNN", "model_final_frcnn.pth")
+YOLO_FILENAME = os.getenv("HF_FILENAME_YOLO", "best_yolo26m_640.pt")
+DETECTRON_DEFAULT_WEIGHTS = f"{WEIGHTS_DIR}/{FRCNN_FILENAME}"
+YOLO_DEFAULT_WEIGHTS = f"{WEIGHTS_DIR}/{YOLO_FILENAME}"
+HF_REPO_ID = os.getenv("HF_REPO_ID", "")
+
 NEW_NAMES = [
     "elbow positive",
     "fingers positive",
@@ -27,6 +33,33 @@ def ensure_weights_exist(weights_path: Path, model_label: str) -> None:
             f"{model_label} weights not found at: {weights_path}. "
             "Place the weights at the default path in the project."
         )
+
+
+def maybe_download_weights(
+    weights_path: Path, repo_id: str, filename: str, model_label: str
+) -> Path:
+    if weights_path.exists():
+        return weights_path
+    if not repo_id:
+        raise FileNotFoundError(
+            f"{model_label} weights not found at: {weights_path}. "
+            "Set HF_REPO_ID_* env var or place the weights locally."
+        )
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError as exc:
+        raise RuntimeError(
+            "huggingface_hub is not installed. Install it to download weights."
+        ) from exc
+
+    weights_path.parent.mkdir(parents=True, exist_ok=True)
+    downloaded = hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        local_dir=weights_path.parent,
+        local_dir_use_symlinks=False,
+    )
+    return Path(downloaded)
 
 
 def draw_detections(image: Image.Image, detections: Iterable[dict]) -> Image.Image:
@@ -201,7 +234,16 @@ def main() -> None:
                 return
 
             weights = Path(weights_path).expanduser()
+            repo_id = (
+                HF_REPO_ID if model_choice == "Faster R-CNN" else HF_REPO_ID
+            )
+            filename = (
+                FRCNN_FILENAME if model_choice == "Faster R-CNN" else YOLO_FILENAME
+            )
             try:
+                weights = maybe_download_weights(
+                    weights, repo_id, filename, model_choice
+                )
                 ensure_weights_exist(weights, model_choice)
             except FileNotFoundError as exc:
                 st.error(str(exc))
@@ -228,7 +270,20 @@ def main() -> None:
             st.image(annotated, caption="Predictions")
 
     with tab_models:
-        st.subheader('Models Descriptions')
+        st.subheader("Faster R-CNN (Detectron2)")
+        st.markdown(
+            f"- Weights: `{DETECTRON_DEFAULT_WEIGHTS}`\n"
+            "- Config: `COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml`\n"
+            "- Input size: 1024 (min/max)\n"
+            f"- Classes ({len(NEW_NAMES)}): {', '.join(NEW_NAMES)}\n"
+            f"- HF repo: `{HF_REPO_ID or 'not set'}`"
+        )
+        st.subheader("YOLO (Ultralytics)")
+        st.markdown(
+            f"- Weights: `{YOLO_DEFAULT_WEIGHTS}`\n"
+            "- Classes: from checkpoint metadata\n"
+            f"- HF repo: `{HF_REPO_ID or 'not set'}`"
+        )
 
 
 if __name__ == "__main__":
