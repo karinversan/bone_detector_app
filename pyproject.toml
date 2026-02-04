@@ -1,0 +1,14 @@
+[project]
+name = "final-bone-detector"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pillow>=10.2",
+    "streamlit>=1.53.1",
+    "torch>=2.10.0",
+    "torchvision>=0.17",
+    "ultralytics>=8.1.0",
+]
