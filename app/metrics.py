@@ -6,11 +6,19 @@ from io import StringIO
 from pathlib import Path
 import time
 
-from .datasets import yolo_seg_to_coco, yolo_seg_to_coco_merged
+from .datasets import yolo_seg_to_coco_merged
 from .detectron import build_detectron_cfg
 from .hf import ensure_weights_exist, maybe_download_weights
 from .yolo import load_yolo_model
-from .config import FROC_FP_PER_IMAGE, FROC_IOU, METRICS_VERSION, NEW_NAMES, YOLO_NAMES
+from .config import (
+    FROC_FP_PER_IMAGE,
+    FROC_IOU,
+    MERGE_FROM_OLD,
+    MERGE_TO_OLD,
+    METRICS_VERSION,
+    NEW_NAMES,
+    OLD_TO_NEW,
+)
 
 
 def _coco_needs_rebuild(coco_json: Path, num_classes: int) -> bool:
@@ -291,12 +299,19 @@ def compute_detectron_metrics(
     return metrics, per_class, froc_curve, bad_class_lines
 
 
+def _map_yolo_class_to_merged(cls_id: int) -> int | None:
+    if cls_id == MERGE_FROM_OLD:
+        cls_id = MERGE_TO_OLD
+    if cls_id not in OLD_TO_NEW:
+        return None
+    return OLD_TO_NEW[cls_id]
+
+
 def compute_yolo_metrics(
     weights_path: Path,
     coco_json: Path,
     image_root: Path,
     labels_dir: Path | None,
-    class_names: list[str],
 ) -> tuple[dict, dict, list[dict], int]:
     from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
@@ -307,18 +322,16 @@ def compute_yolo_metrics(
         raise FileNotFoundError(f"Image folder not found: {image_root}")
 
     bad_class_lines = 0
-    if coco_json.exists() and _coco_needs_rebuild(coco_json, len(class_names)):
+    if coco_json.exists() and _coco_needs_rebuild(coco_json, len(NEW_NAMES)):
         coco_json.unlink()
 
     if not coco_json.exists():
         if labels_dir is None or not labels_dir.exists():
             raise FileNotFoundError(
                 f"COCO json not found: {coco_json}. "
-                "Provide YOLO_VAL_LABELS to build it from YOLO seg labels."
+                "Provide labels_dir to build it from YOLO seg labels."
             )
-        bad_class_lines = yolo_seg_to_coco(
-            image_root, labels_dir, coco_json, class_names
-        )
+        bad_class_lines = yolo_seg_to_coco_merged(image_root, labels_dir, coco_json)
 
     model = load_yolo_model(str(weights_path))
     coco_gt = _quiet_call(lambda: COCO(str(coco_json)))
@@ -338,11 +351,14 @@ def compute_yolo_metrics(
         classes = result.boxes.cls.cpu().numpy().astype(int)
 
         for box, score, cls_id in zip(boxes, scores, classes):
+            merged_id = _map_yolo_class_to_merged(int(cls_id))
+            if merged_id is None:
+                continue
             x1, y1, x2, y2 = box
             preds.append(
                 {
                     "image_id": int(img_id),
-                    "category_id": int(cls_id) + 1,
+                    "category_id": int(merged_id) + 1,
                     "bbox": [float(x1), float(y1), float(x2 - x1), float(y2 - y1)],
                     "score": float(score),
                 }
@@ -361,7 +377,7 @@ def compute_yolo_metrics(
     f1 = _f1_at_iou50(coco_eval)
     if f1 is not None:
         metrics["F1@0.5"] = f1
-    per_class = _per_class_ap(coco_eval, class_names)
+    per_class = _per_class_ap(coco_eval, NEW_NAMES)
     sens_at_fp, froc_curve = _compute_froc(
         coco_gt, preds, FROC_IOU, FROC_FP_PER_IMAGE
     )
@@ -483,7 +499,7 @@ def get_or_compute_yolo_metrics_with_download(
     weights = maybe_download_weights(weights_path, repo_id, filename, "YOLO")
     ensure_weights_exist(weights, "YOLO")
     metrics, per_class, froc_curve, bad_class_lines = compute_yolo_metrics(
-        weights, coco_json, image_root, labels_dir, YOLO_NAMES
+        weights, coco_json, image_root, labels_dir
     )
     payload = {
         "version": METRICS_VERSION,
@@ -517,8 +533,7 @@ def compute_yolo_metrics_with_download(
     coco_json: Path,
     image_root: Path,
     labels_dir: Path | None,
-    class_names: list[str],
 ) -> tuple[dict, dict, list[dict], int]:
     weights = maybe_download_weights(weights_path, repo_id, filename, "YOLO")
     ensure_weights_exist(weights, "YOLO")
-    return compute_yolo_metrics(weights, coco_json, image_root, labels_dir, class_names)
+    return compute_yolo_metrics(weights, coco_json, image_root, labels_dir)

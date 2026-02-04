@@ -32,9 +32,6 @@ def compute_metrics() -> str:
         YOLO_DEFAULT_WEIGHTS,
         YOLO_FILENAME,
         YOLO_METRICS_CACHE,
-        YOLO_VAL_IMAGES,
-        YOLO_VAL_JSON,
-        YOLO_VAL_LABELS,
     )
     from .metrics import (
         get_or_compute_frcnn_metrics_with_download,
@@ -58,9 +55,9 @@ def compute_metrics() -> str:
             HF_REPO_ID,
             Path(YOLO_DEFAULT_WEIGHTS),
             YOLO_FILENAME,
-            Path(YOLO_VAL_JSON),
-            Path(YOLO_VAL_IMAGES),
-            Path(YOLO_VAL_LABELS),
+            Path(FRCNN_VAL_JSON),
+            Path(FRCNN_VAL_IMAGES),
+            Path(FRCNN_VAL_LABELS),
             Path(YOLO_METRICS_CACHE),
         )
     finally:
