@@ -1,7 +1,4 @@
 # Bone X‑Ray Fracture Detector
-
-An application for fracture detection on X‑ray images: Streamlit UI + two detectors (Detectron2 Faster R‑CNN and Ultralytics YOLO) with background metric computation via Celery/Redis.
-
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11-blue" />
   <img alt="Streamlit" src="https://img.shields.io/badge/Streamlit-%3E%3D1.53.1-FF4B4B" />
@@ -12,6 +9,9 @@ An application for fracture detection on X‑ray images: Streamlit UI + two dete
   <img alt="Redis" src="https://img.shields.io/badge/Redis-7-DC382D" />
   <img alt="Docker" src="https://img.shields.io/badge/Docker-Compose-2496ED" />
 </p>
+
+An application for fracture detection on X‑ray images: Streamlit UI + two detectors (Detectron2 Faster R‑CNN and Ultralytics YOLO) with background metric computation via Celery/Redis.
+
 
 ---
 
