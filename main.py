@@ -270,20 +270,8 @@ def main() -> None:
             st.image(annotated, caption="Predictions")
 
     with tab_models:
-        st.subheader("Faster R-CNN (Detectron2)")
-        st.markdown(
-            f"- Weights: `{DETECTRON_DEFAULT_WEIGHTS}`\n"
-            "- Config: `COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml`\n"
-            "- Input size: 1024 (min/max)\n"
-            f"- Classes ({len(NEW_NAMES)}): {', '.join(NEW_NAMES)}\n"
-            f"- HF repo: `{HF_REPO_ID or 'not set'}`"
-        )
-        st.subheader("YOLO (Ultralytics)")
-        st.markdown(
-            f"- Weights: `{YOLO_DEFAULT_WEIGHTS}`\n"
-            "- Classes: from checkpoint metadata\n"
-            f"- HF repo: `{HF_REPO_ID or 'not set'}`"
-        )
+        st.subheader("Models info")
+        
 
 
 if __name__ == "__main__":
