@@ -1,206 +1,80 @@
+"""Streamlit entrypoint.
+
+Modules:
+- app.config: paths, labels, training attrs
+- app.detectron: Detectron2 cfg and inference
+- app.yolo: Ultralytics inference
+- app.metrics: metrics computation
+- app.hf: optional HF download
+- app.ui: rendering helpers
+- app.formatting: table/metric formatting
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
-import os
-from typing import Iterable
 
-import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 import streamlit as st
-import torch
+
+from app.config import (
+    DETECTRON_DEFAULT_WEIGHTS,
+    FRCNN_FILENAME,
+    FRCNN_TRAINING_ATTRS,
+    FRCNN_VAL_IMAGES,
+    FRCNN_VAL_JSON,
+    FRCNN_VAL_LABELS,
+    HF_REPO_ID,
+    NEW_NAMES,
+    YOLO_DATA_YAML,
+    YOLO_DEFAULT_WEIGHTS,
+    YOLO_FILENAME,
+    YOLO_TRAINING_ATTRS,
+)
+from app.detectron import load_detectron_model, predict_detectron
+from app.formatting import dict_to_rows, dict_to_rows_str, metrics_to_display, metrics_with_f1
+from app.metrics import (
+    compute_frcnn_metrics_with_download,
+    compute_yolo_metrics_with_download,
+)
+from app.ui import draw_detections, top_detection_summary
+from app.yolo import load_yolo_model, predict_yolo
 
 
-WEIGHTS_DIR = "weights"
-FRCNN_FILENAME = os.getenv("HF_FILENAME_FRCNN", "model_final_frcnn.pth")
-YOLO_FILENAME = os.getenv("HF_FILENAME_YOLO", "best_yolo26m_640.pt")
-DETECTRON_DEFAULT_WEIGHTS = f"{WEIGHTS_DIR}/{FRCNN_FILENAME}"
-YOLO_DEFAULT_WEIGHTS = f"{WEIGHTS_DIR}/{YOLO_FILENAME}"
-HF_REPO_ID = os.getenv("HF_REPO_ID", "")
-
-NEW_NAMES = [
-    "elbow positive",
-    "fingers positive",
-    "forearm fracture",
-    "humerus",
-    "shoulder fracture",
-    "wrist positive",
-]
-
-
-def ensure_weights_exist(weights_path: Path, model_label: str) -> None:
-    if not weights_path.exists():
-        raise FileNotFoundError(
-            f"{model_label} weights not found at: {weights_path}. "
-            "Place the weights at the default path in the project."
-        )
-
-
-def maybe_download_weights(
-    weights_path: Path, repo_id: str, filename: str, model_label: str
-) -> Path:
-    if weights_path.exists():
-        return weights_path
-    if not repo_id:
-        raise FileNotFoundError(
-            f"{model_label} weights not found at: {weights_path}. "
-            "Set HF_REPO_ID_* env var or place the weights locally."
-        )
+def run_frcnn_metrics() -> None:
     try:
-        from huggingface_hub import hf_hub_download
-    except ImportError as exc:
-        raise RuntimeError(
-            "huggingface_hub is not installed. Install it to download weights."
-        ) from exc
-
-    weights_path.parent.mkdir(parents=True, exist_ok=True)
-    downloaded = hf_hub_download(
-        repo_id=repo_id,
-        filename=filename,
-        local_dir=weights_path.parent,
-        local_dir_use_symlinks=False,
-    )
-    return Path(downloaded)
-
-
-def draw_detections(image: Image.Image, detections: Iterable[dict]) -> Image.Image:
-    annotated = image.copy()
-    draw = ImageDraw.Draw(annotated)
-    for det in detections:
-        x1, y1, x2, y2 = [int(round(v)) for v in det["box"]]
-        label = det["label"]
-        score = det.get("score")
-        text = f"{label} {score:.2f}" if score is not None else label
-
-        draw.rectangle([x1, y1, x2, y2], outline="red", width=3)
-
-        text_bbox = draw.textbbox((0, 0), text)
-        text_w = text_bbox[2] - text_bbox[0]
-        text_h = text_bbox[3] - text_bbox[1]
-        text_x = x1
-        text_y = max(0, y1 - text_h - 4)
-        draw.rectangle(
-            [text_x, text_y, text_x + text_w + 6, text_y + text_h + 4],
-            fill="red",
+        metrics, bad_class_lines = compute_frcnn_metrics_with_download(
+            HF_REPO_ID,
+            Path(DETECTRON_DEFAULT_WEIGHTS),
+            FRCNN_FILENAME,
+            Path(FRCNN_VAL_JSON),
+            Path(FRCNN_VAL_IMAGES),
+            Path(FRCNN_VAL_LABELS),
         )
-        draw.text((text_x + 3, text_y + 2), text, fill="white")
-    return annotated
+        st.session_state["metrics_frcnn"] = metrics
+        st.session_state.pop("metrics_frcnn_error", None)
+        if bad_class_lines:
+            st.session_state[
+                "metrics_frcnn_warning"
+            ] = f"Skipped {bad_class_lines} label lines with invalid class_id."
+        else:
+            st.session_state.pop("metrics_frcnn_warning", None)
+    except Exception as exc:
+        st.session_state["metrics_frcnn_error"] = str(exc)
 
 
-@st.cache_resource(show_spinner=False)
-def load_detectron_model(weights_path: str):
+def run_yolo_metrics() -> None:
     try:
-        from detectron2 import model_zoo
-        from detectron2.config import get_cfg
-        from detectron2.engine import DefaultPredictor
-    except ImportError as exc:
-        raise RuntimeError(
-            "Detectron2 is not installed. Install detectron2 to use the Faster R-CNN model."
-        ) from exc
-    
-
-    cfg = get_cfg()
-    cfg.merge_from_file(
-        model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
-    )
-
-    cfg.MODEL.ROI_HEADS.NUM_CLASSES = 6
-
-    cfg.INPUT.MIN_SIZE_TRAIN = (1024,)
-    cfg.INPUT.MAX_SIZE_TRAIN = 1024
-    cfg.INPUT.MIN_SIZE_TEST = 1024
-    cfg.INPUT.MAX_SIZE_TEST = 1024
-
-    cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [
-        [0.33, 0.5, 1.0, 2.0, 3.0]
-    ] * 5
-
-    cfg.TEST.DETECTIONS_PER_IMAGE = 300
-    cfg.MODEL.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    cfg.MODEL.WEIGHTS = weights_path
-    return DefaultPredictor(cfg)
-
-
-def predict_detectron(
-    predictor, image: Image.Image, class_names: list[str]
-) -> list[dict]:
-    image_bgr = np.array(image)[:, :, ::-1]
-    outputs = predictor(image_bgr)
-    instances = outputs["instances"].to("cpu")
-    boxes = instances.pred_boxes.tensor.numpy()
-    scores = instances.scores.numpy()
-    classes = instances.pred_classes.numpy().astype(int)
-
-    detections = []
-    for box, score, cls_id in zip(boxes, scores, classes):
-        label = class_names[cls_id] if 0 <= cls_id < len(class_names) else f"class_{cls_id}"
-        detections.append(
-            {
-                "label": label,
-                "class_id": int(cls_id),
-                "score": float(score),
-                "box": [float(v) for v in box],
-            }
+        metrics = compute_yolo_metrics_with_download(
+            HF_REPO_ID,
+            Path(YOLO_DEFAULT_WEIGHTS),
+            YOLO_FILENAME,
+            Path(YOLO_DATA_YAML),
         )
-    return detections
-
-
-@st.cache_resource(show_spinner=False)
-def load_yolo_model(weights_path: str):
-    try:
-        from ultralytics import YOLO
-        from ultralytics.nn.tasks import DetectionModel
-        try:
-            from torch.serialization import safe_globals
-        except Exception:
-            safe_globals = None
-    except ImportError as exc:
-        raise RuntimeError(
-            "Ultralytics is not installed. Install ultralytics to use the YOLO model."
-        ) from exc
-    if safe_globals is not None:
-        with safe_globals([DetectionModel]):
-            return YOLO(weights_path)
-    try:
-        torch.serialization.add_safe_globals([DetectionModel])
-    except Exception:
-        pass
-    return YOLO(weights_path)
-
-
-def resolve_yolo_label(model, class_names: list[str], cls_id: int) -> str:
-    if class_names and 0 <= cls_id < len(class_names):
-        return class_names[cls_id]
-    if hasattr(model, "names"):
-        names = model.names
-        if isinstance(names, dict) and cls_id in names:
-            return str(names[cls_id])
-        if isinstance(names, list) and 0 <= cls_id < len(names):
-            return str(names[cls_id])
-    return f"class_{cls_id}"
-
-
-def predict_yolo(model, image: Image.Image, class_names: list[str]) -> list[dict]:
-    results = model.predict(source=np.array(image), verbose=False)
-    result = results[0]
-    if result.boxes is None:
-        return []
-
-    boxes = result.boxes.xyxy.cpu().numpy()
-    scores = result.boxes.conf.cpu().numpy()
-    classes = result.boxes.cls.cpu().numpy().astype(int)
-
-    detections = []
-    for box, score, cls_id in zip(boxes, scores, classes):
-        label = resolve_yolo_label(model, class_names, cls_id)
-        detections.append(
-            {
-                "label": label,
-                "class_id": int(cls_id),
-                "score": float(score),
-                "box": [float(v) for v in box],
-            }
-        )
-    return detections
+        st.session_state["metrics_yolo"] = metrics
+        st.session_state.pop("metrics_yolo_error", None)
+    except Exception as exc:
+        st.session_state["metrics_yolo_error"] = str(exc)
 
 
 def main() -> None:
@@ -212,7 +86,6 @@ def main() -> None:
 
     with tab_predict:
         model_choice = st.selectbox("Model", ["Faster R-CNN", "YOLO"])
-
         weights_path = (
             DETECTRON_DEFAULT_WEIGHTS
             if model_choice == "Faster R-CNN"
@@ -223,10 +96,7 @@ def main() -> None:
         uploaded_file = st.file_uploader(
             "Upload X-ray image", type=["png", "jpg", "jpeg"]
         )
-        if uploaded_file:
-            image = Image.open(uploaded_file).convert("RGB")
-        else:
-            image = None
+        image = Image.open(uploaded_file).convert("RGB") if uploaded_file else None
 
         if st.button("Predict", type="primary"):
             if image is None:
@@ -234,44 +104,77 @@ def main() -> None:
                 return
 
             weights = Path(weights_path).expanduser()
-            repo_id = (
-                HF_REPO_ID if model_choice == "Faster R-CNN" else HF_REPO_ID
-            )
-            filename = (
-                FRCNN_FILENAME if model_choice == "Faster R-CNN" else YOLO_FILENAME
-            )
             try:
-                weights = maybe_download_weights(
-                    weights, repo_id, filename, model_choice
-                )
-                ensure_weights_exist(weights, model_choice)
-            except FileNotFoundError as exc:
-                st.error(str(exc))
+                if model_choice == "Faster R-CNN":
+                    predictor = load_detectron_model(str(weights))
+                    detections = predict_detectron(predictor, image, class_names)
+                else:
+                    model = load_yolo_model(str(weights))
+                    detections = predict_yolo(model, image, class_names)
+            except Exception as exc:
+                st.error(f"Inference failed: {exc}")
                 return
 
-            with st.spinner("Running inference..."):
-                try:
-                    if model_choice == "Faster R-CNN":
-                        predictor = load_detectron_model(str(weights))
-                        detections = predict_detectron(predictor, image, class_names)
-                    else:
-                        model = load_yolo_model(str(weights))
-                        detections = predict_yolo(model, image, class_names)
-                except Exception as exc:
-                    st.error(f"Inference failed: {exc}")
-                    return
-
-                annotated = draw_detections(image, detections)
-
-            if detections:
-                st.info(detections[0]["label"])
+            annotated = draw_detections(image, detections)
+            top_summary = top_detection_summary(detections)
+            if top_summary:
+                st.info(top_summary)
             else:
                 st.info("No fracture")
             st.image(annotated, caption="Predictions")
 
     with tab_models:
-        st.subheader("Models info")
-        
+        info_choice = st.selectbox("Model", ["Faster R-CNN", "YOLO"], key="info_model")
+        if info_choice == "Faster R-CNN":
+            st.subheader("Faster R-CNN (Detectron2)")
+            st.markdown(
+                f"- Weights: `{DETECTRON_DEFAULT_WEIGHTS}`\n"
+                f"- HF repo: `{HF_REPO_ID or 'not set'}`\n"
+                f"- Classes ({len(NEW_NAMES)}): {', '.join(NEW_NAMES)}\n"
+                f"- Val images: `{FRCNN_VAL_IMAGES}`\n"
+                f"- Val labels (YOLO seg): `{FRCNN_VAL_LABELS}`\n"
+                f"- Val COCO json: `{FRCNN_VAL_JSON}`"
+            )
+            st.markdown("Training attributes")
+            st.table(dict_to_rows_str(FRCNN_TRAINING_ATTRS, "Attribute", "Value"))
+
+            st.markdown("Metrics")
+            if st.button("Compute metrics", key="frcnn_metrics"):
+                with st.spinner("Computing metrics..."):
+                    run_frcnn_metrics()
+            if "metrics_frcnn_warning" in st.session_state:
+                st.warning(st.session_state["metrics_frcnn_warning"])
+            if "metrics_frcnn_error" in st.session_state:
+                st.error(f"Metrics failed: {st.session_state['metrics_frcnn_error']}")
+            elif "metrics_frcnn" in st.session_state:
+                metrics = metrics_with_f1(st.session_state["metrics_frcnn"])
+                metrics_display = metrics_to_display(metrics)
+                st.table(dict_to_rows(metrics_display, "Metric", "Value"))
+            else:
+                st.info("Metrics not computed yet.")
+        else:
+            st.subheader("YOLO (Ultralytics)")
+            st.markdown(
+                f"- Weights: `{YOLO_DEFAULT_WEIGHTS}`\n"
+                f"- HF repo: `{HF_REPO_ID or 'not set'}`\n"
+                f"- Data yaml: `{YOLO_DATA_YAML}`\n"
+                "- Classes: from checkpoint metadata"
+            )
+            st.markdown("Training attributes")
+            st.table(dict_to_rows_str(YOLO_TRAINING_ATTRS, "Attribute", "Value"))
+
+            st.markdown("Metrics")
+            if st.button("Compute metrics", key="yolo_metrics"):
+                with st.spinner("Computing metrics..."):
+                    run_yolo_metrics()
+            if "metrics_yolo_error" in st.session_state:
+                st.error(f"Metrics failed: {st.session_state['metrics_yolo_error']}")
+            elif "metrics_yolo" in st.session_state:
+                metrics = metrics_with_f1(st.session_state["metrics_yolo"])
+                metrics_display = metrics_to_display(metrics)
+                st.table(dict_to_rows(metrics_display, "Metric", "Value"))
+            else:
+                st.info("Metrics not computed yet.")
 
 
 if __name__ == "__main__":

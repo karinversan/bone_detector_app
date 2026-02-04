@@ -11,3 +11,6 @@ wheels/
 
 weights
 .DS_Store
+data
+.vscode
+output_eval_frcnn
