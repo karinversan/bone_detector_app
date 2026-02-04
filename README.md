@@ -8,7 +8,6 @@ An application for fracture detection on X‑ray images: Streamlit UI + two dete
   <img alt="Detectron2" src="https://img.shields.io/badge/Detectron2-git-blueviolet" />
   <img alt="Ultralytics" src="https://img.shields.io/badge/Ultralytics-%3E%3D8.1.0-black" />
   <img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-2.1.2-EE4C2C" />
-  <img alt="Torchvision" src="https://img.shields.io/badge/Torchvision-0.16.2-EE4C2C" />
   <img alt="Celery" src="https://img.shields.io/badge/Celery-%3E%3D5.3-3E9F8C" />
   <img alt="Redis" src="https://img.shields.io/badge/Redis-7-DC382D" />
   <img alt="Docker" src="https://img.shields.io/badge/Docker-Compose-2496ED" />
@@ -31,7 +30,7 @@ An application for fracture detection on X‑ray images: Streamlit UI + two dete
 
 <details>
   <summary><b>Demo (gif/video)</b></summary>
-  <p>Add a demo file (gif/mp4) to the repository and place its link inside this block.</p>
+  <p><img src="media/demo.gif" alt="Demo" /></p>
 </details>
 
 ---
@@ -156,4 +155,3 @@ redis-server
 - Results depend on label quality and imaging source.
 - Data are not stored in the repo and must be downloaded separately (see “Data and download”).
 - No clinical/regulatory validation; this is not a medical device and is intended for research/education.
-
