@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import logging
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API.*",
+)
+warnings.filterwarnings(
+    "ignore",
+    message="torch.meshgrid: in an upcoming release.*",
+)
+logging.getLogger("torch.fx").setLevel(logging.ERROR)
+logging.getLogger("torch.fx._symbolic_trace").setLevel(logging.ERROR)
+
 from pathlib import Path
 import subprocess
 import sys
-
-import logging
-import warnings
+import time
 
 from PIL import Image
 import streamlit as st
@@ -75,30 +87,39 @@ def _render_key_metrics(metrics: dict, froc_curve: list[dict]) -> None:
 
 def _ensure_metrics_job() -> None:
     cache_ready = (
-        Path(FRCNN_METRICS_CACHE).exists() and Path(YOLO_METRICS_CACHE).exists()
+        load_metrics_cache(Path(FRCNN_METRICS_CACHE)) is not None
+        and load_metrics_cache(Path(YOLO_METRICS_CACHE)) is not None
     )
     lock_path = Path(METRICS_LOCK)
     if cache_ready or lock_path.exists():
-        return
+        if cache_ready:
+            return
+        try:
+            age = time.time() - lock_path.stat().st_mtime
+        except OSError:
+            return
+        if age < 2 * 60 * 60:
+            return
+        try:
+            lock_path.unlink()
+        except OSError:
+            return
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text("running")
+    lock_path.write_text(str(time.time()))
+    log_path = lock_path.with_suffix(".log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = open(log_path, "a")
     subprocess.Popen(
         [sys.executable, "scripts/compute_metrics.py"],
         cwd=Path(__file__).resolve().parent,
+        stdout=log_file,
+        stderr=log_file,
+        start_new_session=True,
     )
+    log_file.close()
 
 
 def main() -> None:
-    warnings.filterwarnings(
-        "ignore",
-        message="pkg_resources is deprecated as an API.*",
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message="torch.meshgrid: in an upcoming release.*",
-    )
-    logging.getLogger("torch.fx").setLevel(logging.ERROR)
-
     st.set_page_config(page_title="Bone X-Ray Detector")
     st.title("Bone X-Ray Detector")
     st.caption("Upload an X-ray image, choose a model, and run predictions.")

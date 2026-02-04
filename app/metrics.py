@@ -6,11 +6,11 @@ from io import StringIO
 from pathlib import Path
 import time
 
-from .datasets import yolo_seg_to_coco_merged
+from .datasets import yolo_seg_to_coco, yolo_seg_to_coco_merged
 from .detectron import build_detectron_cfg
 from .hf import ensure_weights_exist, maybe_download_weights
 from .yolo import load_yolo_model
-from .config import FROC_FP_PER_IMAGE, FROC_IOU, NEW_NAMES
+from .config import FROC_FP_PER_IMAGE, FROC_IOU, METRICS_VERSION, NEW_NAMES, YOLO_NAMES
 
 
 def _coco_needs_rebuild(coco_json: Path, num_classes: int) -> bool:
@@ -186,42 +186,6 @@ def _compute_froc(
         sens_at_fp[f"Sensitivity@{target} FP/image"] = best
 
     return sens_at_fp, curve
-def _per_class_ap(coco_eval, class_names: list[str]) -> dict:
-    import numpy as np
-
-    precision = coco_eval.eval.get("precision")
-    if precision is None:
-        return {}
-    # precision: [T, R, K, A, M]
-    prec = precision[:, :, :, 0, -1]
-    per_class = {}
-    for k, name in enumerate(class_names):
-        pk = prec[:, :, k]
-        valid = pk[pk > -1]
-        per_class[name] = float(np.mean(valid)) if valid.size else None
-    return per_class
-
-
-def _f1_at_iou50(coco_eval) -> float | None:
-    import numpy as np
-
-    ious = coco_eval.params.iouThrs
-    t = int(np.where(np.isclose(ious, 0.5))[0][0])
-    precision = coco_eval.eval.get("precision")
-    recall = coco_eval.eval.get("recall")
-    if precision is None or recall is None:
-        return None
-    p = precision[t, :, :, 0, -1]
-    p = p[p > -1]
-    r = recall[t, :, 0, -1]
-    r = r[r > -1]
-    if p.size == 0 or r.size == 0:
-        return None
-    p_mean = float(np.mean(p))
-    r_mean = float(np.mean(r))
-    if p_mean + r_mean == 0:
-        return None
-    return (2 * p_mean * r_mean) / (p_mean + r_mean)
 
 
 def _stats_to_coco_metrics(stats: list[float]) -> dict:
@@ -328,17 +292,33 @@ def compute_detectron_metrics(
 
 
 def compute_yolo_metrics(
-    weights_path: Path, coco_json: Path, image_root: Path
-) -> tuple[dict, dict, list[dict]]:
+    weights_path: Path,
+    coco_json: Path,
+    image_root: Path,
+    labels_dir: Path | None,
+    class_names: list[str],
+) -> tuple[dict, dict, list[dict], int]:
     from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
     import numpy as np
     from PIL import Image
 
-    if not coco_json.exists():
-        raise FileNotFoundError(f"COCO json not found: {coco_json}")
     if not image_root.exists():
         raise FileNotFoundError(f"Image folder not found: {image_root}")
+
+    bad_class_lines = 0
+    if coco_json.exists() and _coco_needs_rebuild(coco_json, len(class_names)):
+        coco_json.unlink()
+
+    if not coco_json.exists():
+        if labels_dir is None or not labels_dir.exists():
+            raise FileNotFoundError(
+                f"COCO json not found: {coco_json}. "
+                "Provide YOLO_VAL_LABELS to build it from YOLO seg labels."
+            )
+        bad_class_lines = yolo_seg_to_coco(
+            image_root, labels_dir, coco_json, class_names
+        )
 
     model = load_yolo_model(str(weights_path))
     coco_gt = _quiet_call(lambda: COCO(str(coco_json)))
@@ -381,12 +361,12 @@ def compute_yolo_metrics(
     f1 = _f1_at_iou50(coco_eval)
     if f1 is not None:
         metrics["F1@0.5"] = f1
-    per_class = _per_class_ap(coco_eval, NEW_NAMES)
+    per_class = _per_class_ap(coco_eval, class_names)
     sens_at_fp, froc_curve = _compute_froc(
         coco_gt, preds, FROC_IOU, FROC_FP_PER_IMAGE
     )
     metrics.update(sens_at_fp)
-    return metrics, per_class, froc_curve
+    return metrics, per_class, froc_curve, bad_class_lines
 
 
 def _to_jsonable(value: object):
@@ -426,8 +406,13 @@ def _load_metrics_cache(path: Path) -> dict | None:
         return None
 
 
-def load_metrics_cache(path: Path) -> dict | None:
-    return _load_metrics_cache(path)
+def load_metrics_cache(path: Path, expected_version: int | None = METRICS_VERSION) -> dict | None:
+    cache = _load_metrics_cache(path)
+    if not cache:
+        return None
+    if expected_version is not None and cache.get("version") != expected_version:
+        return None
+    return cache
 
 
 def _save_metrics_cache(path: Path, payload: dict) -> None:
@@ -445,7 +430,7 @@ def get_or_compute_frcnn_metrics_with_download(
     cache_path: Path,
 ) -> tuple[dict, dict, list[dict], int, bool]:
     cache = _load_metrics_cache(cache_path)
-    if cache and "metrics" in cache:
+    if cache and cache.get("version") == METRICS_VERSION and "metrics" in cache:
         return (
             cache["metrics"],
             cache.get("per_class_ap", {}),
@@ -460,6 +445,7 @@ def get_or_compute_frcnn_metrics_with_download(
         weights, coco_json, image_root, labels_dir
     )
     payload = {
+        "version": METRICS_VERSION,
         "metrics": _serialize_metrics(metrics),
         "per_class_ap": _serialize_metrics(per_class),
         "froc_curve": _serialize_metrics(froc_curve),
@@ -482,21 +468,29 @@ def get_or_compute_yolo_metrics_with_download(
     filename: str,
     coco_json: Path,
     image_root: Path,
+    labels_dir: Path | None,
     cache_path: Path,
 ) -> tuple[dict, dict, list[dict], bool]:
     cache = _load_metrics_cache(cache_path)
-    if cache and "metrics" in cache:
-        return cache["metrics"], cache.get("per_class_ap", {}), cache.get("froc_curve", []), True
+    if cache and cache.get("version") == METRICS_VERSION and "metrics" in cache:
+        return (
+            cache["metrics"],
+            cache.get("per_class_ap", {}),
+            cache.get("froc_curve", []),
+            True,
+        )
 
     weights = maybe_download_weights(weights_path, repo_id, filename, "YOLO")
     ensure_weights_exist(weights, "YOLO")
-    metrics, per_class, froc_curve = compute_yolo_metrics(
-        weights, coco_json, image_root
+    metrics, per_class, froc_curve, bad_class_lines = compute_yolo_metrics(
+        weights, coco_json, image_root, labels_dir, YOLO_NAMES
     )
     payload = {
+        "version": METRICS_VERSION,
         "metrics": _serialize_metrics(metrics),
         "per_class_ap": _serialize_metrics(per_class),
         "froc_curve": _serialize_metrics(froc_curve),
+        "bad_class_lines": int(bad_class_lines),
         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     _save_metrics_cache(cache_path, payload)
@@ -517,8 +511,14 @@ def compute_frcnn_metrics_with_download(
 
 
 def compute_yolo_metrics_with_download(
-    repo_id: str, weights_path: Path, filename: str, coco_json: Path, image_root: Path
-) -> tuple[dict, dict, list[dict]]:
+    repo_id: str,
+    weights_path: Path,
+    filename: str,
+    coco_json: Path,
+    image_root: Path,
+    labels_dir: Path | None,
+    class_names: list[str],
+) -> tuple[dict, dict, list[dict], int]:
     weights = maybe_download_weights(weights_path, repo_id, filename, "YOLO")
     ensure_weights_exist(weights, "YOLO")
-    return compute_yolo_metrics(weights, coco_json, image_root)
+    return compute_yolo_metrics(weights, coco_json, image_root, labels_dir, class_names)

@@ -5,6 +5,17 @@ import sys
 import warnings
 from pathlib import Path
 
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API.*",
+)
+warnings.filterwarnings(
+    "ignore",
+    message="torch.meshgrid: in an upcoming release.*",
+)
+logging.getLogger("torch.fx").setLevel(logging.ERROR)
+logging.getLogger("torch.fx._symbolic_trace").setLevel(logging.ERROR)
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
 
@@ -17,6 +28,9 @@ from app.config import (
     FRCNN_VAL_LABELS,
     HF_REPO_ID,
     METRICS_LOCK,
+    YOLO_VAL_IMAGES,
+    YOLO_VAL_JSON,
+    YOLO_VAL_LABELS,
     YOLO_DEFAULT_WEIGHTS,
     YOLO_FILENAME,
     YOLO_METRICS_CACHE,
@@ -28,16 +42,6 @@ from app.metrics import (
 
 
 def main() -> None:
-    warnings.filterwarnings(
-        "ignore",
-        message="pkg_resources is deprecated as an API.*",
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message="torch.meshgrid: in an upcoming release.*",
-    )
-    logging.getLogger("torch.fx").setLevel(logging.ERROR)
-
     lock_path = Path(METRICS_LOCK)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("running")
@@ -56,8 +60,9 @@ def main() -> None:
             HF_REPO_ID,
             Path(YOLO_DEFAULT_WEIGHTS),
             YOLO_FILENAME,
-            Path(FRCNN_VAL_JSON),
-            Path(FRCNN_VAL_IMAGES),
+            Path(YOLO_VAL_JSON),
+            Path(YOLO_VAL_IMAGES),
+            Path(YOLO_VAL_LABELS),
             Path(YOLO_METRICS_CACHE),
         )
     finally:

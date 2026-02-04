@@ -13,8 +13,12 @@ HF_REPO_ID = os.getenv("HF_REPO_ID", "")
 FRCNN_VAL_JSON = "data/BoneFractureYolo8/val_merged.json"
 FRCNN_VAL_IMAGES = "data/BoneFractureYolo8/valid/images"
 FRCNN_VAL_LABELS = "data/BoneFractureYolo8/valid/labels"
+YOLO_VAL_JSON = "data/BoneFractureYolo8/val_yolo.json"
+YOLO_VAL_IMAGES = "data/BoneFractureYolo8/valid/images"
+YOLO_VAL_LABELS = "data/BoneFractureYolo8/valid/labels"
 YOLO_DATA_YAML = "data/BoneFractureYolo8/data.yaml"
 METRICS_CACHE_DIR = "cache"
+METRICS_VERSION = 2
 FRCNN_METRICS_CACHE = f"{METRICS_CACHE_DIR}/metrics_frcnn.json"
 YOLO_METRICS_CACHE = f"{METRICS_CACHE_DIR}/metrics_yolo.json"
 METRICS_LOCK = f"{METRICS_CACHE_DIR}/metrics.lock"
@@ -44,6 +48,7 @@ MERGE_FROM_OLD = 3
 MERGE_TO_OLD = 4
 KEPT_OLD_IDS = [0, 1, 2, 4, 5, 6]
 OLD_TO_NEW = {old_id: new_id for new_id, old_id in enumerate(KEPT_OLD_IDS)}
+YOLO_NAMES = OLD_NAMES
 
 FRCNN_TRAINING_ATTRS = {
     "model": "Faster R-CNN ResNet-50-FPN",
