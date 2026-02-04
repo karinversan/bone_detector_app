@@ -66,7 +66,7 @@ Flow: Streamlit UI accepts an image → basic preprocessing (PIL‑RGB, BGR for 
 
 ---
 
-## Results (current split in this repo, protocol: 6‑class merged)
+## Results
 
 <table>
   <thead>
