@@ -109,10 +109,19 @@ Open: `http://localhost:8501`
 ```bash
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
-redis-server
-.venv/bin/celery -A app.celery_app worker --loglevel=info
-.venv/bin/streamlit run main.py
+# compute metrics once at server start, then run Streamlit
+./scripts/start_server.sh
 ```
+
+### Weights (Hugging Face)
+If weights are not found locally in `weights/`, the app will try to download them from Hugging Face.
+Set the repository and filenames via environment variables:
+```bash
+export HF_REPO_ID=your_hf_repo_id
+export HF_FILENAME_FRCNN=model_final_frcnn.pth
+export HF_FILENAME_YOLO=best_yolo26m_640.pt
+```
+If the repo is private, also set `HUGGINGFACE_HUB_TOKEN`.
 
 ---
 
