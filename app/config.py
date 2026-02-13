@@ -9,6 +9,10 @@ YOLO_FILENAME = os.getenv("HF_FILENAME_YOLO", "best_yolo26m_640.pt")
 DETECTRON_DEFAULT_WEIGHTS = f"{WEIGHTS_DIR}/{FRCNN_FILENAME}"
 YOLO_DEFAULT_WEIGHTS = f"{WEIGHTS_DIR}/{YOLO_FILENAME}"
 HF_REPO_ID = os.getenv("HF_REPO_ID", "")
+METRICS_REPO_ID = os.getenv("HF_METRICS_REPO_ID", "")
+METRICS_REPO_TYPE = os.getenv("HF_METRICS_REPO_TYPE", "dataset")
+METRICS_FILENAME_FRCNN = os.getenv("HF_METRICS_FILENAME_FRCNN", "metrics_frcnn.json")
+METRICS_FILENAME_YOLO = os.getenv("HF_METRICS_FILENAME_YOLO", "metrics_yolo.json")
 
 FRCNN_VAL_JSON = "data/BoneFractureYolo8/val_merged.json"
 FRCNN_VAL_IMAGES = "data/BoneFractureYolo8/valid/images"

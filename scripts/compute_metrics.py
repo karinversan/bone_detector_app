@@ -27,11 +27,16 @@ from app.config import (
     FRCNN_VAL_JSON,
     FRCNN_VAL_LABELS,
     HF_REPO_ID,
+    METRICS_FILENAME_FRCNN,
+    METRICS_FILENAME_YOLO,
+    METRICS_REPO_ID,
+    METRICS_REPO_TYPE,
     METRICS_LOCK,
     YOLO_DEFAULT_WEIGHTS,
     YOLO_FILENAME,
     YOLO_METRICS_CACHE,
 )
+from app.hf import upload_file_to_hf
 from app.metrics import (
     get_or_compute_frcnn_metrics_with_download,
     get_or_compute_yolo_metrics_with_download,
@@ -62,6 +67,21 @@ def main() -> None:
             Path(FRCNN_VAL_LABELS),
             Path(YOLO_METRICS_CACHE),
         )
+        if METRICS_REPO_ID:
+            upload_file_to_hf(
+                METRICS_REPO_ID,
+                METRICS_FILENAME_FRCNN,
+                Path(FRCNN_METRICS_CACHE),
+                repo_type=METRICS_REPO_TYPE,
+                commit_message="Update FRCNN metrics",
+            )
+            upload_file_to_hf(
+                METRICS_REPO_ID,
+                METRICS_FILENAME_YOLO,
+                Path(YOLO_METRICS_CACHE),
+                repo_type=METRICS_REPO_TYPE,
+                commit_message="Update YOLO metrics",
+            )
     finally:
         if lock_path.exists():
             lock_path.unlink()

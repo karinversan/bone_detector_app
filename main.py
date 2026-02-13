@@ -26,6 +26,10 @@ from app.config import (
     FRCNN_TRAINING_ATTRS,
     FRCNN_METRICS_CACHE,
     HF_REPO_ID,
+    METRICS_FILENAME_FRCNN,
+    METRICS_FILENAME_YOLO,
+    METRICS_REPO_ID,
+    METRICS_REPO_TYPE,
     NEW_NAMES,
     YOLO_DEFAULT_WEIGHTS,
     YOLO_FILENAME,
@@ -34,7 +38,7 @@ from app.config import (
 )
 from app.detectron import load_detectron_model, predict_detectron
 from app.formatting import dict_to_rows_str
-from app.hf import maybe_download_weights
+from app.hf import ensure_file_from_hf, maybe_download_weights
 from app.metrics import load_metrics_cache
 from app.ui import draw_detections, top_detection_summary
 from app.yolo import load_yolo_model, predict_yolo
@@ -99,8 +103,18 @@ def _get_yolo_model(weights_path: str):
 
 
 @st.cache_data(show_spinner=False)
-def _load_metrics_cached(path_str: str) -> dict | None:
-    return load_metrics_cache(Path(path_str))
+def _load_metrics_cached(
+    path_str: str,
+    repo_id: str,
+    filename: str,
+    repo_type: str,
+) -> dict | None:
+    local_path = Path(path_str)
+    try:
+        ensure_file_from_hf(local_path, repo_id, filename, repo_type=repo_type)
+    except Exception:
+        pass
+    return load_metrics_cache(local_path)
 
 
 def _resolve_weights(model_choice: str) -> Path:
@@ -166,7 +180,12 @@ def _render_models_tab() -> None:
         st.table(dict_to_rows_str(FRCNN_TRAINING_ATTRS, "Attribute", "Value"))
 
         st.markdown("Metrics")
-        cache = _load_metrics_cached(FRCNN_METRICS_CACHE)
+        cache = _load_metrics_cached(
+            FRCNN_METRICS_CACHE,
+            METRICS_REPO_ID,
+            METRICS_FILENAME_FRCNN,
+            METRICS_REPO_TYPE,
+        )
         if cache and "metrics" in cache:
             metrics = cache["metrics"]
             froc_curve = cache.get("froc_curve", [])
@@ -182,7 +201,12 @@ def _render_models_tab() -> None:
         st.table(dict_to_rows_str(YOLO_TRAINING_ATTRS, "Attribute", "Value"))
 
         st.markdown("Metrics")
-        cache = _load_metrics_cached(YOLO_METRICS_CACHE)
+        cache = _load_metrics_cached(
+            YOLO_METRICS_CACHE,
+            METRICS_REPO_ID,
+            METRICS_FILENAME_YOLO,
+            METRICS_REPO_TYPE,
+        )
         if cache and "metrics" in cache:
             metrics = cache["metrics"]
             froc_curve = cache.get("froc_curve", [])
