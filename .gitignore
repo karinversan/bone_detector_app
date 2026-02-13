@@ -14,5 +14,4 @@ weights
 data
 .vscode
 output_eval_frcnn
-cache/*.log
-cache/*.lock
+cache/
