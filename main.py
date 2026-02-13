@@ -15,26 +15,31 @@ logging.getLogger("torch.fx").setLevel(logging.ERROR)
 logging.getLogger("torch.fx._symbolic_trace").setLevel(logging.ERROR)
 
 from pathlib import Path
-import time
 
 from PIL import Image
 import streamlit as st
+import torch
 
 from app.config import (
     DETECTRON_DEFAULT_WEIGHTS,
+    FRCNN_FILENAME,
     FRCNN_TRAINING_ATTRS,
     FRCNN_METRICS_CACHE,
-    METRICS_LOCK,
+    HF_REPO_ID,
     NEW_NAMES,
     YOLO_DEFAULT_WEIGHTS,
+    YOLO_FILENAME,
     YOLO_METRICS_CACHE,
     YOLO_TRAINING_ATTRS,
 )
 from app.detectron import load_detectron_model, predict_detectron
 from app.formatting import dict_to_rows_str
+from app.hf import maybe_download_weights
 from app.metrics import load_metrics_cache
 from app.ui import draw_detections, top_detection_summary
 from app.yolo import load_yolo_model, predict_yolo
+
+MODEL_OPTIONS = ("Faster R-CNN", "YOLO")
 
 
 def _render_key_metrics(metrics: dict, froc_curve: list[dict]) -> None:
@@ -83,42 +88,105 @@ def _render_key_metrics(metrics: dict, froc_curve: list[dict]) -> None:
             st.table(froc_curve[:50])
 
 
-def _ensure_metrics_job() -> None:
-    cache_ready = (
-        load_metrics_cache(Path(FRCNN_METRICS_CACHE)) is not None
-        and load_metrics_cache(Path(YOLO_METRICS_CACHE)) is not None
+@st.cache_resource(show_spinner=False)
+def _get_detectron_model(weights_path: str):
+    return load_detectron_model(weights_path)
+
+
+@st.cache_resource(show_spinner=False)
+def _get_yolo_model(weights_path: str):
+    return load_yolo_model(weights_path)
+
+
+@st.cache_data(show_spinner=False)
+def _load_metrics_cached(path_str: str) -> dict | None:
+    return load_metrics_cache(Path(path_str))
+
+
+def _resolve_weights(model_choice: str) -> Path:
+    if model_choice == "Faster R-CNN":
+        return maybe_download_weights(
+            weights_path=Path(DETECTRON_DEFAULT_WEIGHTS),
+            repo_id=HF_REPO_ID,
+            filename=FRCNN_FILENAME,
+            model_label="Faster R-CNN",
+        )
+    return maybe_download_weights(
+        weights_path=Path(YOLO_DEFAULT_WEIGHTS),
+        repo_id=HF_REPO_ID,
+        filename=YOLO_FILENAME,
+        model_label="YOLO",
     )
-    lock_path = Path(METRICS_LOCK)
-    if cache_ready or lock_path.exists():
-        if cache_ready:
+
+
+def _run_inference(model_choice: str, image: Image.Image) -> list[dict]:
+    if model_choice == "Faster R-CNN":
+        weights = _resolve_weights(model_choice)
+        predictor = _get_detectron_model(str(weights))
+        with torch.inference_mode():
+            return predict_detectron(predictor, image, NEW_NAMES)
+    weights = _resolve_weights(model_choice)
+    model = _get_yolo_model(str(weights))
+    with torch.inference_mode():
+        return predict_yolo(model, image, [])
+
+
+def _render_predict_tab() -> None:
+    model_choice = st.selectbox("Model", list(MODEL_OPTIONS))
+    uploaded_file = st.file_uploader(
+        "Upload X-ray image", type=["png", "jpg", "jpeg"]
+    )
+    image = Image.open(uploaded_file).convert("RGB") if uploaded_file else None
+
+    if st.button("Predict", type="primary"):
+        if image is None:
+            st.error("Upload an image before running predictions.")
             return
         try:
-            age = time.time() - lock_path.stat().st_mtime
-        except OSError:
+            with st.spinner("Running inference..."):
+                detections = _run_inference(model_choice, image)
+        except Exception as exc:
+            st.error(f"Inference failed: {exc}")
             return
-        if age < 2 * 60 * 60:
-            return
-        try:
-            lock_path.unlink()
-        except OSError:
-            return
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(str(time.time()))
-    try:
-        from app.tasks import compute_metrics
-    except Exception:
-        try:
-            lock_path.unlink()
-        except OSError:
-            pass
-        return
-    try:
-        compute_metrics.delay()
-    except Exception:
-        try:
-            lock_path.unlink()
-        except OSError:
-            pass
+
+        annotated = draw_detections(image, detections)
+        top_summary = top_detection_summary(detections)
+        if top_summary:
+            st.info(top_summary)
+        else:
+            st.info("No fracture")
+        st.image(annotated, caption="Predictions")
+
+
+def _render_models_tab() -> None:
+    info_choice = st.selectbox("Model", list(MODEL_OPTIONS), key="info_model")
+    if info_choice == "Faster R-CNN":
+        st.subheader("Faster R-CNN (Detectron2)")
+        st.markdown("Training attributes")
+        st.table(dict_to_rows_str(FRCNN_TRAINING_ATTRS, "Attribute", "Value"))
+
+        st.markdown("Metrics")
+        cache = _load_metrics_cached(FRCNN_METRICS_CACHE)
+        if cache and "metrics" in cache:
+            metrics = cache["metrics"]
+            froc_curve = cache.get("froc_curve", [])
+            bad_class_lines = int(cache.get("bad_class_lines", 0))
+            if bad_class_lines:
+                st.warning(
+                    f"Skipped {bad_class_lines} label lines with invalid class_id."
+                )
+            _render_key_metrics(metrics, froc_curve)
+    else:
+        st.subheader("YOLO (Ultralytics)")
+        st.markdown("Training attributes")
+        st.table(dict_to_rows_str(YOLO_TRAINING_ATTRS, "Attribute", "Value"))
+
+        st.markdown("Metrics")
+        cache = _load_metrics_cached(YOLO_METRICS_CACHE)
+        if cache and "metrics" in cache:
+            metrics = cache["metrics"]
+            froc_curve = cache.get("froc_curve", [])
+            _render_key_metrics(metrics, froc_curve)
 
 
 def main() -> None:
@@ -126,78 +194,13 @@ def main() -> None:
     st.title("Bone X-Ray Detector")
     st.caption("Upload an X-ray image, choose a model, and run predictions.")
 
-    _ensure_metrics_job()
-
     tab_predict, tab_models = st.tabs(["Predict", "Models"])
 
     with tab_predict:
-        model_choice = st.selectbox("Model", ["Faster R-CNN", "YOLO"])
-        weights_path = (
-            DETECTRON_DEFAULT_WEIGHTS
-            if model_choice == "Faster R-CNN"
-            else YOLO_DEFAULT_WEIGHTS
-        )
-        class_names = NEW_NAMES if model_choice == "Faster R-CNN" else []
-
-        uploaded_file = st.file_uploader(
-            "Upload X-ray image", type=["png", "jpg", "jpeg"]
-        )
-        image = Image.open(uploaded_file).convert("RGB") if uploaded_file else None
-
-        if st.button("Predict", type="primary"):
-            if image is None:
-                st.error("Upload an image before running predictions.")
-                return
-
-            weights = Path(weights_path).expanduser()
-            try:
-                if model_choice == "Faster R-CNN":
-                    predictor = load_detectron_model(str(weights))
-                    detections = predict_detectron(predictor, image, class_names)
-                else:
-                    model = load_yolo_model(str(weights))
-                    detections = predict_yolo(model, image, class_names)
-            except Exception as exc:
-                st.error(f"Inference failed: {exc}")
-                return
-
-            annotated = draw_detections(image, detections)
-            top_summary = top_detection_summary(detections)
-            if top_summary:
-                st.info(top_summary)
-            else:
-                st.info("No fracture")
-            st.image(annotated, caption="Predictions")
+        _render_predict_tab()
 
     with tab_models:
-        info_choice = st.selectbox("Model", ["Faster R-CNN", "YOLO"], key="info_model")
-        if info_choice == "Faster R-CNN":
-            st.subheader("Faster R-CNN (Detectron2)")
-            st.markdown("Training attributes")
-            st.table(dict_to_rows_str(FRCNN_TRAINING_ATTRS, "Attribute", "Value"))
-
-            st.markdown("Metrics")
-            cache = load_metrics_cache(Path(FRCNN_METRICS_CACHE))
-            if cache and "metrics" in cache:
-                metrics = cache["metrics"]
-                froc_curve = cache.get("froc_curve", [])
-                bad_class_lines = int(cache.get("bad_class_lines", 0))
-                if bad_class_lines:
-                    st.warning(
-                        f"Skipped {bad_class_lines} label lines with invalid class_id."
-                    )
-                _render_key_metrics(metrics, froc_curve)
-        else:
-            st.subheader("YOLO (Ultralytics)")
-            st.markdown("Training attributes")
-            st.table(dict_to_rows_str(YOLO_TRAINING_ATTRS, "Attribute", "Value"))
-
-            st.markdown("Metrics")
-            cache = load_metrics_cache(Path(YOLO_METRICS_CACHE))
-            if cache and "metrics" in cache:
-                metrics = cache["metrics"]
-                froc_curve = cache.get("froc_curve", [])
-                _render_key_metrics(metrics, froc_curve)
+        _render_models_tab()
 
 
 if __name__ == "__main__":
