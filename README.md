@@ -123,6 +123,22 @@ export HF_FILENAME_YOLO=best_yolo26m_640.pt
 ```
 If the repo is private, also set `HUGGINGFACE_HUB_TOKEN`.
 
+### Metrics (Hugging Face)
+You can compute metrics locally and publish them to a Hugging Face dataset repo.
+The server UI will download them automatically when these env vars are set:
+```bash
+export HF_METRICS_REPO_ID=your_hf_dataset_repo
+export HF_METRICS_REPO_TYPE=dataset
+export HF_METRICS_FILENAME_FRCNN=metrics_frcnn.json
+export HF_METRICS_FILENAME_YOLO=metrics_yolo.json
+```
+
+Local upload flow:
+```bash
+export HF_METRICS_REPO_ID=your_hf_dataset_repo
+python scripts/compute_metrics.py
+```
+
 ---
 
 
